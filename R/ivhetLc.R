@@ -1,4 +1,4 @@
-#### IV-het with discrete heterogeneity ##
+#### IV-het with discrete heterogeneity ###
 
 ivhetLc <- function(formula, data, subset, na.action,
                      method     = "bfgs",
