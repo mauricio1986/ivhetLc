@@ -1,6 +1,12 @@
 # ivhetLc #
 
-ivhetLc estimates instrumental variables models with latent classes using the Maximum Likelihood estimator. 
+*ivhetLc* is an R package to estimate instrumental variables models with latent classes using the Maximum Likelihood estimator. 
 
-### What kind of models can be estimated? ###
+## Installation
 
+To install this package in R use the following code:
+
+```{r}
+library("devtools")
+install_github("mauricio1986/ivhetLc")
+```

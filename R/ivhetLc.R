@@ -1,8 +1,11 @@
-#### IV-het with discrete heterogeneity ###
 
+#' @title Estimation of instrumental variables models with latent classes
+#' @author Mauricio Sarrias
+#' @import stats methods Formula maxLik utils
+#' @export
 ivhetLc <- function(formula, data, subset, na.action,
                      method     = "bfgs",
-                     model      =  c("lciv", "lc"),
+                     model      = c("lciv", "lc"),
                      Q          = 2,
                      gradient   = TRUE,
                      print.init = FALSE,
@@ -10,16 +13,11 @@ ivhetLc <- function(formula, data, subset, na.action,
                      start      =  NULL,
                      pert.init  = 0.001,
                      ...){
-  # Required packages
-  require("Formula", quietly = TRUE)
-  require("maxLik",  quietly = TRUE)
-
 
   callT     <- match.call(expand.dots = TRUE)
   callF     <- match.call(expand.dots = FALSE)
   nframe    <- length(sys.calls())
   model     <- match.arg(model)
-  #gradient  <- match.arg(gradient)
 
   # ============================
   # 2. Initial checks
@@ -194,7 +192,6 @@ ivhetLc <- function(formula, data, subset, na.action,
   # ============================
   opt <- callT
   opt$start <- start
-  #opt$gradient <- as.name('gradient')
   m <- match(c('method', 'print.level', 'iterlim',
                'start','tol', 'ftol', 'steptol', 'fixed', 'constraints',
                'control', 'gradient'),
@@ -202,18 +199,17 @@ ivhetLc <- function(formula, data, subset, na.action,
   opt <- opt[c(1L, m)]
   opt[[1]] <- as.name("maxLik")
   if(messages) cat("Estimating an IVLC-Linear model", "\n")
-  opt$logLik <- as.name("ml_lcivd2")
+  opt$logLik <- as.name("ml_lcivd")
   opt[c("y1", "y2", "X", "Z", "W", "Q")] <- list(as.name("y1"),
                                                      as.name("y2"),
                                                      as.name("X"),
                                                      as.name("Z"),
                                                      as.name("Hl"),
                                                      as.name("Q"))
-  #print(opt)
   out <- eval(opt, sys.frame(which = nframe))
 
   ##############################
-  ## ave results
+  ## 6 Save results
   ##############################
   out$y1          <- y1
   out$y2          <- y2
@@ -235,7 +231,7 @@ ivhetLc <- function(formula, data, subset, na.action,
 
 
 
-ml_lcivd2 <- function(theta, y1, y2, X, Z, W, Q, gradient = TRUE){
+ml_lcivd <- function(theta, y1, y2, X, Z, W, Q, gradient = TRUE){
   #param: bq, dq, lq, lnsigma_eq, lnsigma_vq, athrho_q
   K <- ncol(X)
   P <- ncol(Z)
@@ -258,7 +254,6 @@ ml_lcivd2 <- function(theta, y1, y2, X, Z, W, Q, gradient = TRUE){
   rownames(delta) <- colnames(Z); colnames(delta) <- paste("class", 1:Q, sep = ":")
 
   # Create components for log-likelihood function
-  f      <- dnorm
   index1 <- tcrossprod(X, t(beta))        #N * Q
   index2 <- tcrossprod(Z, t(delta))       #N * Q
   y1     <- repCols(y1, n = Q)            #N * Q
@@ -266,57 +261,48 @@ ml_lcivd2 <- function(theta, y1, y2, X, Z, W, Q, gradient = TRUE){
   a      <- (y1 - index1)
   b      <- (y2 - index2)
   r      <- (sigma_e / sigma_v)
-  aiq    <- (a - r * rho * b) / sqrt((1 - rho^2) * sigma_e^2)
+  sd.y1  <- sqrt((1 - rho^2) * sigma_e^2)
+  aiq    <- (a - r * rho * b) / sd.y1
   biq    <- b / sigma_v
-  #P1     <-  (1 / sqrt((1 - rho^2) * sigma_e^2)) * f(aiq)
-  P1     <- dnorm(y1,  mean = index1 + r * rho * b, sd = sqrt((1 - rho^2) * sigma_e^2))
-  #P1     <- pmax(P1, .Machine$double.eps)
-  #P1[is.nan(P1)] <- 0
-  #P2   <- (1 / sigma_v) * f(biq)
+  P1     <- dnorm(y1, mean = index1 + r * rho * b, sd = sd.y1)
   P2     <- dnorm(y2, mean = index2, sd = sigma_v)
-  #P1[is.nan(P2)] <- 0
 
   # Make weights from a multinomial logit model
   ew <- lapply(W, function(x) exp(crossprod(t(x), lambda)))
   sew <- suml(ew)
   Wiq <- lapply(ew, function(x){ v <- x / sew;
-  v[is.na(v)] <- 0;
-  as.vector(v)})
+                                v[is.na(v)] <- 0;
+                                as.vector(v)})
   Wiq <- Reduce(cbind, Wiq)
 
   Piq <- P1 * P2
-  #Piq <- pmax(P1 * P2 , .Machine$double.eps)
-  Pi <- apply(Wiq * Piq, 1, sum)
-  #Pi <- pmax(apply(Wiq * Piq, 1, sum), .Machine$double.eps)
-  Pi <- pmax(Pi, .Machine$double.eps)
-  #Pi[is.nan(Pi)] <- Inf
-  LL <- log(Pi)
-
+  Pi  <- apply(Wiq * Piq, 1, sum)
+  Pi  <- pmax(Pi, .Machine$double.eps)
+  LL  <- log(Pi)
 
   ##Gradient
   if (gradient) {
-    frat     <- function(x) (-x * dnorm(x)) / pmax(dnorm(x), .Machine$double.eps)
-    dp1  <-  -1 * frat(aiq) * (1 / sqrt((1 - rho^2) * sigma_e^2))
-    dp2  <-  (frat(aiq) * (1 / sqrt((1 - rho^2) * sigma_e^2)) * r * rho - frat(biq) * (1 / sigma_v))
-    dpse <-  -1 - frat(aiq) * (a / sqrt((1 - rho^2) * sigma_e^2))
-    dpsv <-   frat(aiq) * (rho * sigma_e * b / (sqrt((1 - rho^2) * sigma_e^2) * sigma_v)) - frat(biq) * (b / sigma_v) - 1
-    dpdt <-   rho + frat(aiq) * ((a * rho - b*r) / sqrt(sech(athrho)^2 * sigma_e^2))
+    frat <- function(x) -x
+    dp1  <- -1 * frat(aiq) * (1 / sd.y1)
+    dp2  <- (frat(aiq) * (1 / sd.y1) * r * rho - frat(biq) * (1 / sigma_v))
+    dpse <- -1 - frat(aiq) * (a / sd.y1)
+    dpsv <- frat(aiq) * (rho * sigma_e * b / (sd.y1 * sigma_v)) - frat(biq) * (b / sigma_v) - 1
+    dpdt <- rho + frat(aiq) * ((a * rho - b*r) / sqrt(sech(athrho)^2 * sigma_e^2))
 
-    Qiq  <-  (Wiq * Piq / Pi)
-    eta  <-  Qiq * dp1
+    Qiq  <- (Wiq * Piq / Pi)
+    eta  <- Qiq * dp1
     etar <- eta[, rep(1:Q, each = K)]
-    Xg <- X[, rep(1:K, Q)] # N * (K * Q)
+    Xg   <- X[, rep(1:K, Q)] # N * (K * Q)
     grad.beta <- Xg * etar
 
-    eta <- Qiq * dp2
+    eta  <- Qiq * dp2
     etar <- eta[, rep(1:Q, each = P)]
-    Zg <- Z[, rep(1:P, Q)] # N * (P * Q)
+    Zg   <- Z[, rep(1:P, Q)] # N * (P * Q)
     grad.delta <- Zg * etar
 
     grad.lnsigma_e <- Qiq * dpse
     grad.lnsigma_v <- Qiq * dpsv
-
-    grad.athrho <- Qiq * dpdt
+    grad.athrho    <- Qiq * dpdt
 
     Wg <- vector(mode = "list", length = Q)
     IQ <- diag(Q)
@@ -326,325 +312,12 @@ ml_lcivd2 <- function(theta, y1, y2, X, Z, W, Q, gradient = TRUE){
     colnames(grad) <- names(theta)
     attr(LL,'gradient') <- grad
   }
+  attr(LL, 'pi')      <- Wiq
+  attr(LL, 'post_pi') <- Wiq * Piq / Pi
   LL
 }
 
-sech <- function(x) 1 / cosh(x)
-
-## suml function from mlogit (Croissant, 2013)
-suml <- function(x){
-  n <- length(x)
-  if (!is.null(dim(x[[1]]))) {
-    d <- dim(x[[1]])
-    s <- matrix(0,d[1], d[2])
-    for (i in 1:n) {
-      x[[i]][is.na(x[[i]])] <- 0
-      s <- s + x[[i]]
-    }
-  }
-  else{
-    s <- rep(0,length(x[[n]]))
-    for (i in 1:n) {
-      x[[i]][is.na(x[[i]])] <- 0
-      s <- s + x[[i]]
-    }
-  }
-  s
-}
 
 
-repRows <- function(x, n){
-  matrix(rep(x, each = n), nrow = n)
-}
 
-repCols <- function(x, n){
-  matrix(rep(x, each = n), ncol = n, byrow = TRUE)
-}
-
-getSummary.lciv <- function(obj, alpha = 0.05, ...){
-  s       <- summary(obj)
-  cf      <- s$estimate
-  Q       <- obj$Q
-  y.var   <- obj$y.var
-  end.var <- obj$end.var
-  # Obtain shares
-  shares   <- make.shares(coef(obj), obj)
-  jac      <- numDeriv::jacobian(make.shares, coef(obj), obj = obj)
-  se       <- sqrt(diag(jac %*% vcov(obj) %*% t(jac)))
-  z        <- shares / se
-  p        <- 2 * pnorm(-abs(z))
-  shares.T <- cbind(shares, se, z, p)
-  rownames(shares.T) <- paste("class", 1:Q, "share", sep = ".")
-  # Obtain rhos
-  rhos     <- make.rhos(coef(obj), obj)
-  jac      <- numDeriv::jacobian(make.rhos, coef(obj), obj = obj)
-  se       <- sqrt(diag(jac %*% vcov(obj) %*% t(jac)))
-  z        <- rhos / se
-  p        <- 2 * pnorm(-abs(z))
-  shares.R <- cbind(rhos, se, z, p)
-  rownames(shares.R) <- paste("class", 1:Q, "rho", sep = ".")
-  # Obtain sigmas
-  sigmas   <- make.sigmas(coef(obj), obj)
-  jac      <- numDeriv::jacobian(make.sigmas, coef(obj), obj = obj)
-  se       <- sqrt(diag(jac %*% vcov(obj) %*% t(jac)))
-  z        <- sigmas / se
-  p        <- 2 * pnorm(-abs(z))
-  shares.S <- cbind(sigmas, se, z, p)
-  names.s <- c()
-  for (q in 1:Q) names.s <- c(names.s, paste("class", q, paste("eq", 1:2, "sigma", sep = "."), sep = "."))
-  rownames(shares.S) <- names.s
-  # Wlate
-  wlate    <- make.wlate(coef(obj), obj)
-  #names(wlate) <- paste("class", 1, "wlate", sep = ".")
-  jac      <- numDeriv::jacobian(make.wlate, coef(obj), obj = obj)
-  se       <- sqrt(diag(jac %*% vcov(obj) %*% t(jac)))
-  z        <- wlate / se
-  p        <- 2 * pnorm(-abs(z))
-  shares.W <- cbind(wlate, se, z, p)
-  rownames(shares.W) <- paste("class", 1, "wlate", sep = ".")
-  # Make table
-  cf       <- rbind(cf, shares.R, shares.S, shares.T, shares.W)
-  names.pi <- colnames(model.matrix(obj$formula, data = obj$mf, rhs = 3))
-  names.H  <- paste("pi", names.pi, sep = ".")
-  cval    <- qnorm(1 - alpha/2)
-  cf      <- cbind(cf, cf[, 1] - cval * cf[, 2], cf[, 1] + cval * cf[, 2])
-
-  names.x  <- paste("eq.1",   colnames(model.matrix(obj$formula, data = obj$mf, rhs = 1)), sep = ".")
-  names.z  <- paste("eq.2",   colnames(model.matrix(obj$formula, data = obj$mf, rhs = 2)), sep = ".")
-  names.pi <- colnames(model.matrix(obj$formula, data = obj$mf, rhs = 3))
-  names.H <- paste("pi", names.pi, sep = ".")
-  all.vars <- unique(c(names.x, names.z, names.H,
-                       paste('eq', 1:2, "lnsigma", sep = '.'),
-                       "athrho",
-                       "rho",
-                        paste('eq', 1:2, "sigma", sep = '.'),
-                       "share",
-                       "wlate"))
-  # Table by class
-  coef <- array(dim = c(length(all.vars),6, Q),
-                dimnames = list(all.vars, c("est", "se", "stat", "p", "lwr", "upr"), paste("class", 1:Q, sep = " ")))
-  for (q in 1:Q) {
-    temp.vars    <- grep(paste0("class.", q), rownames(cf), value = TRUE)
-    temp.vars.no <- gsub(paste0("class.", q, "."), "",  temp.vars)
-    coef[rownames(coef) %in% temp.vars.no, , q] <- cf[rownames(cf) %in% temp.vars, ]
-  }
-  # Statistics
-  sumstat <- c(logLik = logLik(obj), deviance = NA, AIC = AIC(obj), BIC = BIC(obj), N = nObs(obj),
-               LR = NA, df = NA, p = NA, Aldrich.Nelson = NA, McFadden = NA, Cox.Snell = NA)
-  list(coef = coef, sumstat = sumstat, contrasts = obj$contrasts, xlevels = obj$xlevels, call = obj$call)
-}
-
-
-make.shares <- function(theta, obj, ...){
-  theta    <- theta
-  names.pi <- colnames(model.matrix(obj$formula, data = obj$mf, rhs = 3))
-  names.H  <- paste("pi", names.pi, sep = ".")
-  H.bar    <- colMeans(model.matrix(obj$formula, data = obj$mf, rhs = 3))
-  Q        <- obj$Q
-  expsq    <- c(exp(0))
-  for (q in 2:Q){
-    hd <- c(0)
-    for (l in 1:length(H.bar)){
-        name.delta <- paste("class", q, names.H[l], sep = ".")
-        temp       <- H.bar[l] * theta[name.delta]
-        hd         <- hd + temp
-    }
-    expsq <- c(expsq, exp(hd))
-  }
-  shares <- expsq / sum(expsq)
-  return(shares)
-}
-
-make.rhos<- function(theta, obj, ...){
-  Q <- obj$Q
-  rhos <- c()
-  for (q in 1:Q){
-    name.rho <- paste("class", q, "athrho", sep = ".")
-    rhos <- c(rhos, tanh(theta[name.rho]))
-  }
-  return(rhos)
-}
-
-make.sigmas <- function(theta, obj, ...){
-  Q      <- obj$Q
-  sigmas <- c()
-  for (q in 1:Q){
-    name.sigma1 <- paste("class", q, "eq.1.lnsigma", sep = ".")
-    name.sigma2 <- paste("class", q, "eq.2.lnsigma", sep = ".")
-    sigmas      <- c(sigmas, exp(theta[name.sigma1]), exp(theta[name.sigma2]))
-  }
-  return(sigmas)
-}
-
-
-make.wlate <- function(theta, obj, ...){
-  shares <- make.shares(theta, obj)
-  end    <- obj$end.var
-  beta.names  <- grep(end, names(theta), value = TRUE)
-  wlate <- sum(shares * theta[beta.names])
-  return(wlate)
-}
-
-
-fit.measures <- function(obj, ...){
-    AIC <- AIC(obj)
-    BIC <- BIC(obj)
-
-}
-
-
-# gen_init <- function(y1, y2, X, Z, H, namesH, Hl, Q, R = 50){
-#   s_class        <- rep(0, ncol(H))
-#   names(s_class) <- namesH
-#   ols1           <- lm(y1 ~ X - 1)
-#   ols2           <- lm(y2 ~ Z - 1)
-#   beta           <- coef(ols1)
-#   delta          <- coef(ols2)
-#   lnsigma_e      <- log(sigma(ols1))
-#   lnsigma_v      <- log(sigma(ols2))
-#   rho            <- cor(resid(ols1), resid(ols2))
-#   athrho         <- 0.5 * log((1 + rho)/(1 - rho))
-#
-#   #pert   <- runif(R, min = 0, max = 5)
-#   pert <- seq(0.001, 0.09, length.out = 500)
-#   logl.values <- c()
-#   init.par    <- c()
-#   for (r in 1:R){
-#     shift        <- seq(-pert[r], pert[r], length.out = Q)
-#     lc.beta      <- lc.delta  <- lc.lnsigma_e  <- lc.lnsigma_v  <- lc.athrho  <- c()
-#     for (i in 1:Q) {
-#       lc.beta       <- c(lc.beta,      beta      + shift[i])
-#       lc.delta      <- c(lc.delta,     delta     + shift[i])
-#       lc.lnsigma_e  <- c(lc.lnsigma_e, lnsigma_e + shift[i])
-#       lc.lnsigma_v  <- c(lc.lnsigma_v, lnsigma_v + shift[i])
-#       lc.athrho     <- c(lc.athrho,    athrho    + shift[i])
-#     }
-#     thetas <- c(lc.beta, lc.delta, s_class, lc.lnsigma_e, lc.lnsigma_v, lc.athrho)
-#     init.par <- rbind(init.par, thetas)
-#     logl.values <- c(logl.values,
-#                      sum(ml_lcivd2(thetas,
-#                                    y1 = y1,
-#                                    y2 = y2,
-#                                    X  = X,
-#                                    Z  = Z,
-#                                    W  = Hl,
-#                                    Q = Q,
-#                                    gradient = FALSE)))
-#   }
-#   start <- init.par[which(max(logl.values) == logl.values), ]
-#   names(beta)      <- paste("eq.1", colnames(X), sep = ".")
-#   names(delta)     <- paste("eq.2", colnames(Z), sep = ".")
-#   names(lnsigma_e) <- paste("eq.1", "lnsigma", sep = ".")
-#   names(lnsigma_v) <- paste("eq.2", "lnsigma", sep = ".")
-#   lc.nbeta         <- lc.ndelta  <- lc.nlnsigma_e  <- lc.nlnsigma_v  <- lc.nathrho  <- c()
-#   for (i in 1:Q) {
-#     lc.nbeta      <- c(lc.nbeta ,     paste('class', i, names(beta)      , sep = '.'))
-#     lc.ndelta     <- c(lc.ndelta,     paste('class', i, names(delta)     , sep = '.'))
-#     lc.nlnsigma_e <- c(lc.nlnsigma_e, paste('class', i, names(lnsigma_e) , sep = '.'))
-#     lc.nlnsigma_v <- c(lc.nlnsigma_v, paste('class', i, names(lnsigma_v) , sep = '.'))
-#     lc.nathrho    <- c(lc.nathrho,    paste('class', i, "athrho"         , sep = '.'))
-#   }
-#   names(lc.beta)      <- lc.nbeta
-#   names(lc.delta)     <- lc.ndelta
-#   names(lc.lnsigma_e) <- lc.nlnsigma_e
-#   names(lc.lnsigma_v) <- lc.nlnsigma_v
-#   names(lc.athrho)    <- lc.nathrho
-#   names(start) <- c(lc.nbeta, lc.ndelta, namesH, lc.nlnsigma_e, lc.nlnsigma_v, lc.nathrho)
-#   out <- list(start = start, pert.init = pert[which(max(logl.values) == logl.values)])
-#   return(out)
-# }
-
-
-# ml_lcivd <- function(theta, y1, y2, X, Z, W, Q, gradient = TRUE){
-#   #param: bq, dq, lq, lnsigma_eq, lnsigma_vq, athrho_q
-#   K <- ncol(X)
-#   P <- ncol(Z)
-#   L <- ncol(W[[1]])
-#   N <- nrow(X)
-#
-#   beta      <- matrix(theta[1L:(K * Q)], nrow = K, ncol = Q)                        # Matrix of K*Q
-#   delta     <- matrix(theta[((K * Q) + 1):((P * Q) + (K * Q))], nrow = P, ncol = Q) # Matrix of P*Q
-#   lambda    <- theta[((P * Q) + (K * Q) + 1):(L + (P * Q) + (K * Q))]               # vector of (Q - 1) * L
-#   lnsigma_e <- repRows(tail(theta, n = 3 * Q)[1:Q], n = nrow(X))                    # Matrix of n * Q
-#   lnsigma_v <- repRows(tail(theta, n = 2 * Q)[1:Q], n = nrow(X))                    # Matrix of n * Q
-#   athrho    <- repRows(tail(theta, n = Q), n = nrow(X))                             # Matrix of n * Q
-#   sigma_e   <- exp(lnsigma_e)
-#   sigma_v   <- exp(lnsigma_v)
-#   rho       <- tanh(athrho)
-#
-#   rownames(beta)  <- colnames(X); colnames(beta)  <- paste("class", 1:Q, sep = ":")
-#   rownames(delta) <- colnames(Z); colnames(delta) <- paste("class", 1:Q, sep = ":")
-#
-#   # Create components for log-likelihood function
-#   f      <- dnorm
-#   index1 <- tcrossprod(X, t(beta))        #N * Q
-#   index2 <- tcrossprod(Z, t(delta))       #N * Q
-#   y1     <- repCols(y1, n = Q)            #N * Q
-#   y2     <- repCols(y2, n = Q)            #N * Q
-#   a      <- (y1 - index1)
-#   b      <- (y2 - index2)
-#   r      <- (sigma_e / sigma_v)
-#   tiq    <- (a - r * rho * b)
-#   aiq    <- - (1 / (2 * (1 - rho^2) * sigma_e^2)) * (tiq) ^ 2
-#   biq    <- b / sigma_v
-#   #P1     <- (1 / (sqrt(2 * pi * (1 - rho^2) * sigma_e^2))) * exp(aiq)
-#   P1     <- (1 / (sqrt(2 * pi * (1 - rho^2) * sigma_e^2))) * exp(aiq)
-#   #P1 <-  (1 / sqrt((1 - rho^2) * sigma_e^2)) * f(tiq / sqrt((1 - rho^2) * sigma_e^2))
-#   P1     <- pmax(P1, .Machine$double.eps)
-#   P1[is.na(P1)] <- 0
-#   P2   <- (1 / sigma_v) * f(biq)
-#   P1[is.na(P2)] <- 0
-#
-#   # Make weights from a multinomial logit model
-#   ew <- lapply(W, function(x) exp(crossprod(t(x), lambda)))
-#   sew <- suml(ew)
-#   Wiq <- lapply(ew, function(x){ v <- x / sew;
-#   v[is.na(v)] <- 0;
-#   as.vector(v)})
-#   Wiq <- Reduce(cbind, Wiq)
-#
-#   Piq <- P1 * P2
-#   #Piq <- pmax(P1 * P2 , .Machine$double.eps)
-#   Pi <- pmax(apply(Wiq * Piq, 1, sum), .Machine$double.eps)
-#   Pi[is.na(Pi)] <- 0
-#   LL <- log(Pi)
-#
-#   ##Gradient
-#   if (gradient) {
-#     ff       <- function(x) -x * dnorm(x)
-#     #frat     <- function(x) ff(x) / f(x)
-#     dp1  <- tiq / ((1 - rho^2) * sigma_e^2)
-#     #dp1 <- -1 * (ff(tiq/sqrt((1 - rho^2) * sigma_e^2)) / f(tiq/sqrt((1 - rho^2) * sigma_e^2))) * (1/sqrt((1 - rho^2) * sigma_e^2))
-#     dp2  <- -1 * (dp1 * r * rho + (ff(biq) / f(biq)) * (1 / sigma_v))
-#     #dp2   <- (ff(tiq/sqrt((1 - rho^2) * sigma_e^2)) / f(tiq/sqrt((1 - rho^2) * sigma_e^2))) * (1/sqrt((1 - rho^2) * sigma_e^2)) * r * rho - (ff(biq) / f(biq)) * (1 / sigma_v)
-#     dpse <- -1 + (a * tiq) / ((1 -  rho^2) * sigma_e^2)
-#     dpsv <- - (tiq * rho * b) / ((1 -rho^2) * sigma_e * sigma_v)  - (ff(biq) / f(biq) * b / sigma_v) - 1
-#     dpdt <-   (rho * sech(athrho)^2) / (1 - rho^2) - ((sech(athrho)^2 * tiq) / ((1 -rho^2)^2 * sigma_e^2)) * (a * rho - b*r)
-#
-#     Qiq  <-  (Wiq * Piq / Pi)
-#     eta  <-  Qiq * dp1
-#     etar <- eta[, rep(1:Q, each = K)]
-#     Xg <- X[, rep(1:K, Q)] # N * (K * Q)
-#     grad.beta <- Xg * etar
-#
-#     eta <- Qiq * dp2
-#     etar <- eta[, rep(1:Q, each = P)]
-#     Zg <- Z[, rep(1:P, Q)] # N * (P * Q)
-#     grad.delta <- Zg * etar
-#
-#     grad.lnsigma_e <- Qiq * dpse
-#     grad.lnsigma_v <- Qiq * dpsv
-#
-#     grad.athrho <- Qiq * dpdt
-#
-#     Wg <- vector(mode = "list", length = Q)
-#     IQ <- diag(Q)
-#     for (q in 1:Q) Wg[[q]] <- rowSums(Qiq * (repRows(IQ[q, ], N) - repCols(Wiq[, q], Q)))
-#     grad.lambda <- suml(mapply("*", W, Wg, SIMPLIFY = FALSE))
-#     grad <- cbind(grad.beta, grad.delta, grad.lambda, grad.lnsigma_e, grad.lnsigma_v, grad.athrho)
-#     colnames(grad) <- names(theta)
-#     attr(LL,'gradient') <- grad
-#   }
-#   LL
-# }
 
