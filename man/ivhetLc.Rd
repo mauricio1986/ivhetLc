@@ -16,7 +16,7 @@ ivhetLc(
   print.init = FALSE,
   messages = TRUE,
   start = NULL,
-  pert.init = 0.001,
+  pert.init = 0.05,
   ...
 )
 }

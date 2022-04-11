@@ -11,7 +11,7 @@ ivhetLc <- function(formula, data, subset, na.action,
                      print.init = FALSE,
                      messages   = TRUE,
                      start      =  NULL,
-                     pert.init  = 0.001,
+                     pert.init  = 0.05,
                      ...){
 
   callT     <- match.call(expand.dots = TRUE)
@@ -154,15 +154,15 @@ ivhetLc <- function(formula, data, subset, na.action,
       names(delta) <- paste("eq.2", colnames(Z), sep = ".")
       names(lnsigma_e) <- paste("eq.1", "lnsigma", sep = ".")
       names(lnsigma_v) <- paste("eq.2", "lnsigma", sep = ".")
-      init.shift   <- seq(-pert.init, pert.init, length.out = Q)
+      init.shift   <- cumprod(c(1, rep(pert.init + 1, Q - 1)))
       lc.beta      <- lc.delta  <- lc.lnsigma_e  <- lc.lnsigma_v  <- lc.athrho  <- c()
       lc.nbeta     <- lc.ndelta  <- lc.nlnsigma_e  <- lc.nlnsigma_v  <- lc.nathrho  <- c()
       for (i in 1:Q) {
-        lc.beta       <- c(lc.beta,      beta      + init.shift[i])
-        lc.delta      <- c(lc.delta,     delta     + init.shift[i])
-        lc.lnsigma_e  <- c(lc.lnsigma_e, lnsigma_e + init.shift[i])
-        lc.lnsigma_v  <- c(lc.lnsigma_v, lnsigma_v + init.shift[i])
-        lc.athrho     <- c(lc.athrho,    athrho    + init.shift[i])
+        lc.beta       <- c(lc.beta,      beta      * init.shift[i])
+        lc.delta      <- c(lc.delta,     delta     * init.shift[i])
+        lc.lnsigma_e  <- c(lc.lnsigma_e, lnsigma_e * init.shift[i])
+        lc.lnsigma_v  <- c(lc.lnsigma_v, lnsigma_v * init.shift[i])
+        lc.athrho     <- c(lc.athrho,    athrho    * init.shift[i])
         lc.nbeta      <- c(lc.nbeta ,     paste('class', i, names(beta)      , sep = '.'))
         lc.ndelta     <- c(lc.ndelta,     paste('class', i, names(delta)     , sep = '.'))
         lc.nlnsigma_e <- c(lc.nlnsigma_e, paste('class', i, names(lnsigma_e) , sep = '.'))
