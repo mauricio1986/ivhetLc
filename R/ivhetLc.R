@@ -142,13 +142,14 @@ ivhetLc <- function(formula, data, subset, na.action,
      else {
       # Estimate both equations separately
       if(messages) cat("Estimating two OLS models for initial values", fill = TRUE)
-      ols1         <- lm(y1 ~ X - 1)
+      #ols1         <- lm(y1 ~ X - 1)
+      iv          <- AER::ivreg(y1 ~ X - 1| Z - 1)
       ols2         <- lm(y2 ~ Z - 1)
-      beta         <- coef(ols1)
+      beta         <- coef(iv)
       delta        <- coef(ols2)
-      lnsigma_e    <- log(sigma(ols1))
+      lnsigma_e    <- log(iv$sigma)
       lnsigma_v    <- log(sigma(ols2))
-      rho          <- cor(resid(ols1), resid(ols2))
+      rho          <- cor(resid(iv), resid(ols2))
       athrho       <- 0.5 * log((1 + rho)/(1 - rho))
       names(beta)  <- paste("eq.1", colnames(X), sep = ".")
       names(delta) <- paste("eq.2", colnames(Z), sep = ".")
