@@ -1,5 +1,5 @@
 
-#' @title Estimation of instrumental variables models with latent classes
+#' @title Estimation of instrumental variables models with latent classes (Discrete heterogeneity)
 #' @author Mauricio Sarrias
 #' @import stats methods Formula maxLik utils flexmix
 #' @export
